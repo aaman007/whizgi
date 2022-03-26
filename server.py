@@ -5,9 +5,7 @@ import sys
 import io
 import os
 import datetime
-
-
-SERVER_ADDRESS = (HOST, PORT) = 'localhost', 8000
+import argparse
 
 
 def grim_reaper(signum, frame):
@@ -33,7 +31,6 @@ class WSGIServer:
         listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listen_socket.bind(server_address)
         listen_socket.listen(WSGIServer.REQUEST_QUEUE_SIZE)
-        signal.signal(signal.SIGCHLD, grim_reaper)
         host, port = listen_socket.getsockname()[:2]
 
         self.server_name = socket.getfqdn(host)
@@ -51,6 +48,7 @@ class WSGIServer:
         self.application = application
 
     def serve_forever(self):
+        signal.signal(signal.SIGCHLD, grim_reaper)
         listen_socket = self.listen_socket
 
         while True:
@@ -154,20 +152,51 @@ class WSGIServer:
         return environ
 
 
-def make_server(server_address, application):
-    server = WSGIServer(server_address)
+def make_server(host, port, application):
+    server = WSGIServer((host, port))
     server.set_app(application)
     return server
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit('Provide a WSGI application object as module:callable')
+def wsgi_app_path(wsgi_app):
+    if wsgi_app.count(':') != 1:
+        raise ValueError()
+    module, application = wsgi_app.split(':')
+    if not module or not application:
+        raise ValueError()
+    return module, application
 
-    app_path = sys.argv[1]
-    module, application = app_path.split(':')
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Process configuration')
+    parser.add_argument(
+        '-a',
+        '--wsgi-app',
+        dest='wsgi_app',
+        type=wsgi_app_path,
+        help='wsgi application location in form module:callable',
+        required=True,
+    )
+    parser.add_argument(
+        '-H',
+        '--host',
+        dest='host',
+        type=str,
+        default='127.0.0.1',
+        help='host name or ip address',
+    )
+    parser.add_argument(
+        '-p',
+        '--port',
+        dest='port',
+        type=int,
+        default=8000,
+        help='port for the WSGI application',
+    )
+    args = parser.parse_args()
+    module, application = args.wsgi_app
     module = __import__(module)
     application = getattr(module, application)
-    server = make_server(SERVER_ADDRESS, application)
-    print(f'WSGIServer: Serving HTTP on port {PORT} ...\n')
+    server = make_server(args.host, args.port, application)
+    print(f'WSGIServer: Serving HTTP on http://{args.host}:{args.port} ...\n')
     server.serve_forever()
